@@ -2,7 +2,6 @@ import SwiftUI
 import AVFoundation
 
 struct ContentView: View {
-    @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @State private var showOnboarding = true
     @State private var isPresented = false
     @StateObject private var sharedDataManager = SharedDataManager()
@@ -25,11 +24,10 @@ struct ContentView: View {
     
     var body: some View {
         Group {
-            if !hasSeenOnboarding {
+            if showOnboarding {
                 OnboardingView(showOnboarding: $showOnboarding)
                     .transition(.opacity)
             } else {
-               
                 TabView {
                     TrackerTab()
                         .environmentObject(sharedDataManager)
@@ -38,18 +36,71 @@ struct ContentView: View {
                         }
                     
                     RelaxationTab(showBackButton: false)
+                        .environmentObject(sharedDataManager)
                         .tabItem {
                             Label("Relax", systemImage: "leaf.fill")
                         }
                     
                     ERPTab(isPresented: .constant(true))
+                        .environmentObject(sharedDataManager)
                         .tabItem {
                             Label("ERP", systemImage: "clock")
                         }
                 }
             }
         }
-        .animation(.easeInOut, value: hasSeenOnboarding)
+        .animation(.easeInOut, value: showOnboarding)
+    }
+}
+
+
+struct TutorialOverlayView: View {
+    let title: String
+    let steps: [(icon: String, text: String)]
+    let onDismiss: () -> Void
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.75)
+                .ignoresSafeArea()
+            
+            VStack(spacing: 24) {
+                Text(title)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(steps, id: \.text) { step in
+                        HStack(spacing: 12) {
+                            Image(systemName: step.icon)
+                                .foregroundColor(.blue)
+                                .font(.system(size: 24))
+                            
+                            Text(step.text)
+                                .foregroundColor(.white)
+                                .font(.body)
+                        }
+                    }
+                }
+                .padding(.vertical)
+                
+                Button(action: onDismiss) {
+                    Text("Got it!")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.blue)
+                        .cornerRadius(12)
+                }
+                .padding(.horizontal)
+            }
+            .padding()
+            .background(Color.black.opacity(0.5))
+            .cornerRadius(20)
+            .padding()
+        }
     }
 }
 
@@ -63,12 +114,13 @@ struct TrackerTab: View {
     @State private var selectedEntryForStrategies: OCDEntry? = nil
     
     @State private var currentMood: Int = 3
-    @State private var showMoodInput = false
+    @State private var showMoodInputs = false
     @State private var selectedTriggers: Set<String> = []
     @State private var moodNote: String = ""
     @State private var showLogs = false
     @State private var selectedEntries = Set<OCDEntry>()
     @State private var isEditing = false
+    @State private var showClearHistoryConfirmation = false
     
    
     let copingStrategies: [String: [String]] = [
@@ -120,17 +172,16 @@ struct TrackerTab: View {
         NavigationView {
             ZStack(alignment: .bottom) {
                 ScrollView {
-                    LazyVStack(spacing: 24) {
-                        // Mood Tracking Section
-                        VStack(alignment: .leading, spacing: 12) {
+                    VStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
                             Text("How are you feeling?")
                                 .font(.headline)
                                 .foregroundColor(.secondary)
                             
-                            Button(action: { showMoodInput = true }) {
+                            Button(action: { showMoodInputs = true }) {
                                 HStack {
                                     Text(moodEmoji(for: currentMood))
-                                        .font(.system(size: 40))
+                                        .font(.system(size: 32))
                                     Text("Track your mood")
                                         .foregroundColor(.primary)
                                     Spacer()
@@ -139,7 +190,7 @@ struct TrackerTab: View {
                                 }
                                 .padding()
                                 .background(
-                                    RoundedRectangle(cornerRadius: 12)
+                                    RoundedRectangle(cornerRadius: 22)
                                         .fill(Color(.systemBackground))
                                         .shadow(color: .black.opacity(0.05), radius: 5)
                                 )
@@ -147,37 +198,163 @@ struct TrackerTab: View {
                         }
                         .padding(.horizontal)
                         
-                       
-                        InsightsView(moodHistory: shared.moodHistory, entries: shared.entries)
+                      
+                        VStack(spacing: 24) {
+                            VStack(alignment: .leading, spacing: 16) {
+                                HStack {
+                                    Label("Mood Trends", systemImage: "chart.xyaxis.line")
+                                        .font(.headline)
+                                        .foregroundColor(.primary)
+                                    
+                                    Spacer()
+                                    
+                                    if !shared.moodHistory.isEmpty {
+                                        Button(role: .destructive) {
+                                            showClearHistoryConfirmation = true
+                                        } label: {
+                                            Label("Clear History", systemImage: "trash")
+                                                .font(.subheadline)
+                                        }
+                                    }
+                                }
+                                
+                                if shared.moodHistory.isEmpty {
+                                    EmptyStateView(
+                                        imageName: "chart.bar.fill",
+                                        title: "No Mood Data",
+                                        message: "Start tracking your moods to see insights"
+                                    )
+                                } else {
+                                    MoodGraphView(moodHistory: shared.moodHistory)
+                                }
+                            }
+                            .padding()
+                            .background(Color(.systemBackground))
+                            .cornerRadius(25)
+                            .shadow(color: Color.black.opacity(0.05), radius: 5)
+                            .padding(.horizontal)
+                            .confirmationDialog(
+                                "Clear Mood History",
+                                isPresented: $showClearHistoryConfirmation,
+                                titleVisibility: .visible
+                            ) {
+                                Button("Clear All History", role: .destructive) {
+                                    shared.clearMoodHistory()
+                                }
+                                Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("This will permanently delete all mood tracking data. This action cannot be undone.")
+                            }
+                            
+                           
+                            VStack(alignment: .center, spacing: 16) {
+                                Label("Progress Stats", systemImage: "chart.bar.xaxis")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                
+                                LazyVGrid(columns: [
+                                    GridItem(.flexible(), spacing: 16),
+                                    GridItem(.flexible(), spacing: 16)
+                                ], spacing: 16) {
+                                    StatView(
+                                        title: "Average Mood",
+                                        value: averageMoodText(),
+                                        icon: "gauge.medium",
+                                        color: averageMoodColor()
+                                    )
+                                    
+                                    StatView(
+                                        title: "Total Entries",
+                                        value: "\(shared.moodHistory.count)",
+                                        icon: "doc.text.badge.plus",
+                                        color: .green
+                                    )
+                                    
+                                    StatView(
+                                        title: "Best Day",
+                                        value: bestDay(),
+                                        icon: "crown.fill",
+                                        color: .yellow
+                                    )
+                                    
+                                    StatView(
+                                        title: "Streak",
+                                        value: "\(currentStreak()) days",
+                                        icon: "chart.line.uptrend.xyaxis.circle.fill",
+                                        color: .orange
+                                    )
+                                }
+                                .frame(maxWidth: .infinity, alignment: .center)
+                            }
+                            .padding()
+                            .background(Color(.systemBackground))
+                            .cornerRadius(25)
+                            .shadow(color: Color.black.opacity(0.05), radius: 5)
+                            .padding(.horizontal)
+                            
+                           
+                            VStack(alignment: .leading, spacing: 16) {
+                                Label("Common Triggers", systemImage: "exclamationmark.triangle")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                if let triggers = mostCommonTriggers() {
+                                    ForEach(Array(triggers.enumerated()), id: \.1) { index, trigger in
+                                        HStack {
+                                            Text("\(index + 1).")
+                                                .foregroundColor(.secondary)
+                                            Text(trigger)
+                                                .foregroundColor(.primary)
+                                            Spacer()
+                                            Text("\(triggerCount(trigger))")
+                                                .foregroundColor(.secondary)
+                                                .font(.caption)
+                                        }
+                                        if index < triggers.count - 1 {
+                                            Divider()
+                                        }
+                                    }
+                                } else {
+                                    EmptyStateView(
+                                        imageName: "list.bullet",
+                                        title: "No Triggers",
+                                        message: "Add triggers when logging moods"
+                                    )
+                                }
+                            }
+                            .padding()
+                            .background(Color(.systemBackground))
+                            .cornerRadius(25)
+                            .shadow(color: Color.black.opacity(0.05), radius: 5)
+                            .padding(.horizontal)
+                        }
                         
-                       
                         Color.clear.frame(height: 90)
                     }
                 }
-                .frame(maxHeight: .infinity)
-               .background(Color(.systemGroupedBackground))
-                
-                
-                VStack {
+                .background(Color(.systemGroupedBackground))
+                 VStack {
                     Button(action: { showLogs = true }) {
-                        HStack(spacing: 12) {
+                        HStack(spacing: 8) {
                             Image(systemName: "plus.circle.fill")
-                                .font(.headline)
+                                .font(.system(size: 14))
                             Text("Log Obsession")
-                                .font(.headline)
+                                .font(.system(size: 14))
                         }
                         .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
+                        .frame(maxWidth: .infinity, maxHeight: 36)
+                        .padding(.horizontal, 32)
+                        .padding(.vertical, 8)
                         .background(Color.blue)
-                        .cornerRadius(16)
+                        .cornerRadius(18)
                     }
-                    .padding(.horizontal)
+                    .frame(width: UIScreen.main.bounds.width * 0.7)
                     .padding(.bottom, 8)
                 }
             }
-            .navigationTitle("OCD Tracker")
-            .sheet(isPresented: $showMoodInput) {
+            .navigationTitle("Hey OCDians,")
+            .sheet(isPresented: $showMoodInputs) {
                 MoodInputView(
                     currentMood: $currentMood,
                     selectedTriggers: $selectedTriggers,
@@ -199,9 +376,25 @@ struct TrackerTab: View {
             shared.loadData()
             currentMood = shared.moodHistory.last?.mood ?? 3
         }
+        .overlay(
+            Group {
+                if !shared.hasSeenTrackerTutorial {
+                    TutorialOverlayView(
+                        title: "Welcome to Tracker",
+                        steps: [
+                            ("chart.bar.fill", "Track your daily moods and see patterns"),
+                            ("list.bullet", "Log your obsessive thoughts"),
+                            ("chart.line.uptrend.xyaxis", "Monitor your progress over time"),
+                            ("arrow.clockwise", "Review your common triggers")
+                        ],
+                        onDismiss: { shared.markTutorialAsSeen("tracker") }
+                    )
+                }
+            }
+        )
     }
     
-    private func addEntry() {
+    private func addNewEntry() {
         if !newEntry.isEmpty {
             let newOCDEntry = OCDEntry(obsession: newEntry, compulsion: "")
             shared.addEntry(newOCDEntry)
@@ -268,9 +461,79 @@ struct TrackerTab: View {
         
         shared.addMood(newMood)
         currentMood = value
-        showMoodInput = false
+        showMoodInputs = false
         selectedTriggers.removeAll()
         moodNote = ""
+    }
+    private func mostCommonTriggers() -> [String]? {
+        var triggerCounts: [String: Int] = [:]
+        shared.moodHistory.forEach { mood in
+            mood.triggers.forEach { trigger in
+                triggerCounts[trigger, default: 0] += 1
+            }
+        }
+        
+        if triggerCounts.isEmpty {
+            return nil
+        }
+        
+        let sortedTriggers = triggerCounts.sorted { $0.value > $1.value }
+        return Array(sortedTriggers.prefix(5).map { $0.key })
+    }
+    
+    private func triggerCount(_ trigger: String) -> Int {
+        shared.moodHistory.filter { $0.triggers.contains(trigger) }.count
+    }
+    
+    private func averageMoodText() -> String {
+        let average = shared.moodHistory.isEmpty ? 0 :
+            Double(shared.moodHistory.reduce(0) { $0 + $1.mood }) / Double(shared.moodHistory.count)
+        
+        switch average {
+        case 0..<1.5: return "Challenging"
+        case 1.5..<2.5: return "Struggling"
+        case 2.5..<3.5: return "Stable"
+        case 3.5..<4.5: return "Good"
+        case 4.5...5.0: return "Excellent"
+        default: return "Unknown"
+        }
+    }
+    
+    private func averageMoodColor() -> Color {
+        let average = shared.moodHistory.isEmpty ? 0 :
+            Double(shared.moodHistory.reduce(0) { $0 + $1.mood }) / Double(shared.moodHistory.count)
+        
+        switch average {
+        case 0..<1.5: return .red
+        case 1.5..<2.5: return .orange
+        case 2.5..<3.5: return .yellow
+        case 3.5..<4.5: return .green
+        case 4.5...5.0: return .blue
+        default: return .gray
+        }
+    }
+    
+    private func bestDay() -> String {
+        shared.moodHistory.max { $0.mood < $1.mood }?.date.formatted(date: .abbreviated, time: .omitted) ?? "No data"
+    }
+    
+    private func currentStreak() -> Int {
+        var streak = 0
+        var currentDate = Date()
+        let calendar = Calendar.current
+        
+        let sortedMoods = shared.moodHistory.sorted { $0.date > $1.date }
+        
+        for mood in sortedMoods {
+            if calendar.isDate(mood.date, inSameDayAs: currentDate) {
+                streak += 1
+                currentDate = calendar.date(byAdding: .day, value: -1, to: currentDate) ?? currentDate
+            } else {
+                break
+            }
+        }
+        
+        return streak
     }
 }
 
@@ -287,6 +550,7 @@ struct OCDEntry: Identifiable, Codable, Hashable {
 
 
 struct RelaxationTab: View {
+    @EnvironmentObject private var shared: SharedDataManager
     let relaxationOptions = [
         RelaxationOption(title: "Breathing Exercise", icon: "lungs.fill", color: .blue),
         RelaxationOption(title: "Body Scan", icon: "figure.stand", color: .purple),
@@ -328,6 +592,22 @@ struct RelaxationTab: View {
                 }
             }
         }
+        .overlay(
+            Group {
+                if !shared.hasSeenRelaxationTutorial {
+                    TutorialOverlayView(
+                        title: "Welcome to Relaxation",
+                        steps: [
+                            ("lungs.fill", "Practice guided breathing exercises"),
+                            ("figure.walk", "Try body scan meditation"),
+                            ("brain.head.profile", "Learn mindfulness techniques"),
+                            ("heart.fill", "Reduce anxiety and stress")
+                        ],
+                        onDismiss: { shared.markTutorialAsSeen("relaxation") }
+                    )
+                }
+            }
+        )
     }
 }
 
@@ -361,6 +641,7 @@ struct RelaxationCardView: View {
 
 
 struct ERPTab: View {
+    @EnvironmentObject private var shared: SharedDataManager
     @State private var timeRemaining = 60
     @State private var isTimerRunning = false
     @State private var timer: Timer?
@@ -379,7 +660,10 @@ struct ERPTab: View {
     @State private var counter = 0
     @State private var isRunning = false
     @State private var isCompleted = false
-
+    @State private var previousTimerState = false
+    @State private var savedTimeRemaining = 0
+    @State private var pausedTimeRemaining: Int? = nil
+    
     let timeOptions = [60, 300, 600]
     let anxietyLevels = Array(1...10)
 
@@ -392,7 +676,6 @@ struct ERPTab: View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Challenge Section
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Describe your challenge")
                             .font(.headline)
@@ -406,10 +689,36 @@ struct ERPTab: View {
                                     .fill(Color(.systemBackground))
                                     .shadow(color: .black.opacity(0.05), radius: 5)
                             )
+                        
+                        if sessionCompleted {
+                            let anxietyChange = anxietyBefore - anxietyAfter
+                            VStack(spacing: 12) {
+                                Text("Anxiety Change")
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+                                
+                                HStack {
+                                    Image(systemName: anxietyChange > 0 ? "arrow.down.circle.fill" :
+                                            anxietyChange < 0 ? "arrow.up.circle.fill" : "equal.circle.fill")
+                                        .foregroundColor(anxietyChange > 0 ? .green :
+                                            anxietyChange < 0 ? .red : .orange)
+                                        .font(.system(size: 24))
+                                    
+                                    Text("\(abs(anxietyChange)) point\(abs(anxietyChange) == 1 ? "" : "s") \(anxietyChange > 0 ? "decrease" : anxietyChange < 0 ? "increase" : "no change")")
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(Color(.systemBackground))
+                                    .shadow(color: .black.opacity(0.05), radius: 8)
+                            )
+                            .padding(.top, 8)
+                        }
                     }
                     .padding()
                     
-                    // Timer Section
                     VStack(spacing: 16) {
                         Text("Duration")
                             .font(.headline)
@@ -422,6 +731,7 @@ struct ERPTab: View {
                         }
                         .pickerStyle(.segmented)
                         .padding(.horizontal)
+                        .disabled(isTimerRunning)
                         
                         if isTimerRunning {
                             Text(formatTime(timeRemaining))
@@ -448,8 +758,6 @@ struct ERPTab: View {
                             .shadow(color: .black.opacity(0.05), radius: 8)
                     )
                     .padding(.horizontal)
-                    
-                    // Anxiety Level Section
                     if !isTimerRunning {
                         VStack(spacing: 16) {
                             Text("Anxiety Levels")
@@ -473,35 +781,6 @@ struct ERPTab: View {
                         .padding(.horizontal)
                     }
                     
-                    // If sessionCompleted is true, add this view after the anxiety sliders
-                    if sessionCompleted {
-                        let anxietyChange = anxietyBefore - anxietyAfter
-                        VStack(spacing: 12) {
-                            Text("Anxiety Change")
-                                .font(.headline)
-                                .foregroundColor(.secondary)
-                            
-                            HStack {
-                                Image(systemName: anxietyChange > 0 ? "arrow.down.circle.fill" :
-                                       anxietyChange < 0 ? "arrow.up.circle.fill" : "equal.circle.fill")
-                                    .foregroundColor(anxietyChange > 0 ? .green :
-                                       anxietyChange < 0 ? .red : .orange)
-                                    .font(.system(size: 24))
-                                
-                                Text("\(abs(anxietyChange)) point\(abs(anxietyChange) == 1 ? "" : "s") \(anxietyChange > 0 ? "decrease" : anxietyChange < 0 ? "increase" : "no change")")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding()
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color(.systemBackground))
-                                .shadow(color: .black.opacity(0.05), radius: 8)
-                        )
-                        .padding(.horizontal)
-                    }
-                    
-                    // Action Buttons
                     HStack(spacing: 20) {
                         Button("Coping Tips") {
                             showCopingTips = true
@@ -517,6 +796,12 @@ struct ERPTab: View {
                         }
                         
                         Button("Panic Button") {
+                            if isTimerRunning {
+                                pausedTimeRemaining = timeRemaining
+                                timer?.invalidate()
+                                timer = nil
+                                isTimerRunning = false
+                            }
                             showBreathingExerciseModal = true
                         }
                         .font(.headline)
@@ -532,33 +817,71 @@ struct ERPTab: View {
             }
             .navigationTitle("ERP Session")
             .background(Color(.systemGroupedBackground))
-            .sheet(isPresented: $showBreathingExerciseModal) {
+            .sheet(isPresented: $showBreathingExerciseModal, onDismiss: {
+                if let remainingTime = pausedTimeRemaining {
+                    timeRemaining = remainingTime
+                    isTimerRunning = true
+                    timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                        DispatchQueue.main.async {
+                            if self.timeRemaining > 0 {
+                                self.timeRemaining -= 1
+                            } else {
+                                self.timer?.invalidate()
+                                self.timer = nil
+                                self.isTimerRunning = false
+                                self.sessionCompleted = true
+                            }
+                        }
+                    }
+                    pausedTimeRemaining = nil
+                }
+            }) {
                 NavigationView {
-                    startBreathingExercise()
+                    BreathingView()
                 }
             }
         }
+        .overlay(
+            Group {
+                if !shared.hasSeenERPTutorial {
+                    TutorialOverlayView(
+                        title: "Welcome to ERP",
+                        steps: [
+                            ("clock.fill", "Set exposure exercise duration"),
+                            ("arrow.up.heart.fill", "Rate your anxiety levels"),
+                            ("chart.bar.fill", "Track your progress"),
+                            ("checkmark.circle.fill", "Complete exercises at your pace")
+                        ],
+                        onDismiss: { shared.markTutorialAsSeen("erp") }
+                    )
+                }
+            }
+        )
     }
     
     private func toggleTimer() {
         if isTimerRunning {
+        
             timer?.invalidate()
             timer = nil
             isTimerRunning = false
+            pausedTimeRemaining = nil
+            timeRemaining = selectedTime
         } else {
+            
             timeRemaining = selectedTime
             isTimerRunning = true
             sessionCompleted = false
-
-            timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { timer in
+            
+            timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
                 DispatchQueue.main.async {
-                    if timeRemaining > 0 {
-                        timeRemaining -= 1
+                    if self.timeRemaining > 0 {
+                        self.timeRemaining -= 1
                     } else {
                         self.timer?.invalidate()
                         self.timer = nil
-                        isTimerRunning = false
-                        sessionCompleted = true
+                        self.isTimerRunning = false
+                        self.sessionCompleted = true
                     }
                 }
             }
@@ -593,8 +916,6 @@ struct ERPTab: View {
             HStack {
                 Text("\(title) Exposure: \(value.wrappedValue)")
                     .foregroundColor(.secondary)
-                
-                // Show emoji for both Before and After exposure
                 let mood = moodEmoji(for: value.wrappedValue)
                 Text(mood.emoji)
                     .font(.system(size: 24))
@@ -608,8 +929,6 @@ struct ERPTab: View {
                 set: { value.wrappedValue = Int($0) }
             ), in: 1...10, step: 1)
             .accentColor(.blue)
-            
-            // Add colored indicators below the slider
             HStack {
                 Text("Less Anxious")
                     .font(.caption)
@@ -666,7 +985,7 @@ struct ERPTab: View {
             
             Button(action: {
                 if isRunning {
-                    stopBreathing()  // Call stopBreathing when stopping
+                    stopBreathing()
                 } else {
                     startBreathing()
                 }
@@ -675,7 +994,7 @@ struct ERPTab: View {
                     .font(.headline)
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity, minHeight: 56)
-                    .background(isRunning ? Color.red : Color.blue)  // Change color to red for stop
+                    .background(isRunning ? Color.red : Color.blue)
                     .cornerRadius(16)
                     .padding(.horizontal)
             }
@@ -686,18 +1005,15 @@ struct ERPTab: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Done") {
-                    stopBreathing()  // Stop the exercise
-                    showBreathingExerciseModal = false  // Close the modal
+                    stopBreathing()
+                    showBreathingExerciseModal = false
                 }
                 .fontWeight(.bold)
                 .foregroundColor(.blue)
             }
         }
         .onDisappear {
-            // Stop the exercise when view disappears for any reason
             stopBreathing()
-            
-            // Clean up audio
             breatheInSound?.stop()
             breatheOutSound?.stop()
             do {
@@ -714,17 +1030,16 @@ struct ERPTab: View {
         timeRemaining = 4
         isRunning = true
         isCompleted = false
-        breatheIn = false  // Start contracted
+        breatheIn = false
         breathMessage = "Get ready..."
         
-        // Initial delay before starting the exercise
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
             DispatchQueue.main.async {
                 breathMessage = "Breathe in..."
                 withAnimation(.easeInOut(duration: 4)) {
-                    breatheIn = true  // Expand over 4 seconds
+                    breatheIn = true
                 }
-                // Play breathe in sound
+
                 breatheInSound?.play()
                 startBreathingCycle()
             }
@@ -733,19 +1048,16 @@ struct ERPTab: View {
 
     private func startBreathingCycle() {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { timer in
-            // Ensure UI updates happen on the main thread
+            
             DispatchQueue.main.async {
                 if timeRemaining > 0 {
                     timeRemaining -= 1
                 } else {
-                    // Switch to next phase
                     withAnimation(.easeInOut(duration: 4)) {
                         breatheIn.toggle()
                     }
                     timeRemaining = 4
                     breathMessage = breatheIn ? "Breathe in..." : "Breathe out..."
-                    
-                    // Play appropriate sound
                     if breatheIn {
                         breatheInSound?.play()
                     } else {
@@ -768,8 +1080,6 @@ struct ERPTab: View {
         isRunning = false
         isCompleted = true
         breathMessage = "Exercise Complete"
-        
-        // Stop any playing sounds
         breatheInSound?.stop()
         breatheOutSound?.stop()
         
@@ -791,7 +1101,6 @@ struct ERPTab: View {
         breathMessage = "Breathe In"
     }
 
-    // Add these properties to ERPTab
     private var breatheInSound: AVAudioPlayer? = {
         guard let url = Bundle.main.url(forResource: "breatheIn", withExtension: "mp3") else {
             print("Could not find breatheIn.mp3")
@@ -824,7 +1133,7 @@ struct ERPTab: View {
 }
 
 struct CopingTipsView: View {
-    @Environment(\.presentationMode) var presentationMode // To dismiss the sheet
+    @Environment(\.presentationMode) var presentationMode
     
     var body: some View {
         
@@ -846,7 +1155,7 @@ struct CopingTipsView: View {
                 .multilineTextAlignment(.center)
             
             Button("Close") {
-                self.presentationMode.wrappedValue.dismiss() // Dismiss the sheet when clicked
+                self.presentationMode.wrappedValue.dismiss()
             }
             .padding()
             .background(Color.blue)
@@ -862,7 +1171,7 @@ extension Color {
     init(hex: String) {
         let scanner = Scanner(string: hex)
         scanner.currentIndex = hex.startIndex
-        _ = scanner.scanString("#") // Remove #
+        _ = scanner.scanString("#")
 
         var rgbValue: UInt64 = 0
         scanner.scanHexInt64(&rgbValue)
@@ -899,7 +1208,6 @@ struct EntryCopingStrategiesView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Entry details
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Your Entry:")
                         .font(.headline)
@@ -916,8 +1224,6 @@ struct EntryCopingStrategiesView: View {
                         )
                 }
                 .padding(.horizontal)
-                
-                // Strategies
                 VStack(alignment: .leading, spacing: 16) {
                     Text("Suggested Coping Strategies")
                         .font(.headline)
@@ -983,11 +1289,10 @@ struct EntryCopingStrategiesView: View {
     }
 }
 
-// Add these new structs at the top level
 struct OCDMood: Codable, Identifiable {
     let id = UUID()
     let date: Date
-    let mood: Int // 1-5 scale
+    let mood: Int
     let triggers: [String]
     let notes: String
 }
@@ -998,7 +1303,6 @@ struct OCDTrigger: Identifiable {
     let icon: String
 }
 
-// Add these new view structs
 struct MoodInputView: View {
     @Environment(\.presentationMode) var presentationMode
     @EnvironmentObject private var sharedDataManager: SharedDataManager
@@ -1022,7 +1326,6 @@ struct MoodInputView: View {
                     .pickerStyle(.segmented)
                     .padding(.vertical, 8)
                     
-                    // Show the description below
                     HStack {
                         Text(moodEmoji(for: currentMood))
                             .font(.system(size: 32))
@@ -1108,7 +1411,6 @@ struct MoodInputView: View {
     }
 }
 
-// Create a separate view for the Mood Trends card
 struct MoodTrendsCard: View {
     let moodHistory: [OCDMood]
     
@@ -1120,11 +1422,7 @@ struct MoodTrendsCard: View {
             Text("Last 7 days")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
-            
-            // Bar Chart
             MoodBarChart(moodHistory: moodHistory)
-            
-            // Legend
             MoodLegend()
         }
         .padding()
@@ -1132,15 +1430,12 @@ struct MoodTrendsCard: View {
         .cornerRadius(12)
     }
 }
-
-// Update the MoodBarChart struct
 struct MoodBarChart: View {
     let moodHistory: [OCDMood]
     @Namespace private var animation
     
     var body: some View {
         HStack(alignment: .bottom, spacing: 12) {
-            // Changed from reversed() to normal order to show oldest to newest
             ForEach(Array(moodHistory.suffix(7)), id: \.id) { mood in
                 MoodBar(mood: mood)
                     .transition(.scale)
@@ -1151,7 +1446,6 @@ struct MoodBarChart: View {
     }
 }
 
-// Individual mood bar
 struct MoodBar: View {
     let mood: OCDMood
     
@@ -1200,7 +1494,6 @@ struct MoodBar: View {
     }
 }
 
-// Legend view
 struct MoodLegend: View {
     var body: some View {
         HStack(spacing: 16) {
@@ -1241,22 +1534,32 @@ struct MoodLegend: View {
     }
 }
 
-// Update the InsightsView to use these components
 struct InsightsView: View {
+    @EnvironmentObject private var shared: SharedDataManager
     let moodHistory: [OCDMood]
     let entries: [OCDEntry]
     @Environment(\.presentationMode) var presentationMode
+    @State private var showClearConfirmation = false
     
     var body: some View {
         NavigationView {
             ScrollView {
                 VStack(spacing: 24) {
-                    // Mood Trends Card
                     GroupBox {
                         VStack(alignment: .leading, spacing: 16) {
-                            Label("Mood Trends", systemImage: "chart.xyaxis.line")
-                                .font(.headline)
-                                .foregroundColor(.primary)
+                            HStack {
+                                Label("Mood Trends", systemImage: "chart.xyaxis.line")
+                                    .font(.headline)
+                                    .foregroundColor(.primary)
+                                
+                                Spacer()
+                                Button(role: .destructive) {
+                                    showClearConfirmation = true
+                                } label: {
+                                    Label("Clear History", systemImage: "trash")
+                                        .font(.subheadline)
+                                }
+                            }
                             
                             if moodHistory.isEmpty {
                                 EmptyStateView(
@@ -1269,8 +1572,6 @@ struct InsightsView: View {
                             }
                         }
                     }
-                    
-                    // Common Triggers Card
                     GroupBox {
                         VStack(alignment: .leading, spacing: 16) {
                             Label("Common Triggers", systemImage: "exclamationmark.triangle")
@@ -1302,47 +1603,57 @@ struct InsightsView: View {
                             }
                         }
                     }
-                    
-                    // Progress Stats Card
+                    .padding()
+                    .background(Color(.systemBackground))
+                    .cornerRadius(25)
+                    .shadow(color: Color.black.opacity(0.05), radius: 5)
+                    .padding(.horizontal)
+
                     GroupBox {
-                        VStack(alignment: .leading, spacing: 16) {
-                            Label("Progress Stats", systemImage: "chart.bar.fill")
+                        VStack(alignment: .center, spacing: 16) {
+                            Label("Progress Stats", systemImage: "chart.bar.xaxis")
                                 .font(.headline)
                                 .foregroundColor(.primary)
-                            
+                                .frame(maxWidth: .infinity, alignment: .center)
                             LazyVGrid(columns: [
-                                GridItem(.flexible()),
-                                GridItem(.flexible())
+                                GridItem(.flexible(), spacing: 16),
+                                GridItem(.flexible(), spacing: 16)
                             ], spacing: 16) {
                                 StatView(
                                     title: "Average Mood",
                                     value: averageMoodText(),
-                                    icon: "heart.fill",
+                                    icon: "gauge.medium",
                                     color: averageMoodColor()
                                 )
                                 
                                 StatView(
                                     title: "Total Entries",
-                                    value: "\(moodHistory.count)",
-                                    icon: "number.circle.fill",
+                                    value: "\(shared.moodHistory.count)",
+                                    icon: "doc.text.badge.plus",
                                     color: .green
                                 )
                                 
                                 StatView(
                                     title: "Best Day",
                                     value: bestDay(),
-                                    icon: "star.fill",
+                                    icon: "crown.fill",
                                     color: .yellow
                                 )
                                 
                                 StatView(
                                     title: "Streak",
                                     value: "\(currentStreak()) days",
-                                    icon: "flame.fill",
+                                    icon: "chart.line.uptrend.xyaxis.circle.fill",
                                     color: .orange
                                 )
                             }
+                            .frame(maxWidth: .infinity, alignment: .center)
                         }
+                        .padding()
+                        .background(Color(.systemBackground))
+                        .cornerRadius(25)
+                        .shadow(color: Color.black.opacity(0.05), radius: 5)
+                        .padding(.horizontal)
                     }
                 }
                
@@ -1350,9 +1661,19 @@ struct InsightsView: View {
             }
             .navigationTitle("Insights")
             .navigationBarTitleDisplayMode(.large)
-            //.frame(minWidth: 0, maxHeight: 450)
+            .confirmationDialog(
+                "Clear Mood History",
+                isPresented: $showClearConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Clear All History", role: .destructive) {
+                    shared.clearMoodHistory()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will permanently delete all mood tracking data. This action cannot be undone.")
+            }
         }
-        
     }
     
     private func mostCommonTriggers() -> [String]? {
@@ -1408,16 +1729,16 @@ struct InsightsView: View {
         var currentDate = Date()
         let calendar = Calendar.current
         
-        // Sort mood history by date, most recent first
+        
         let sortedMoods = moodHistory.sorted { $0.date > $1.date }
         
         for mood in sortedMoods {
             if mood.date.isSameDay(as: currentDate) {
                 streak += 1
-                // Move to previous day
+               
                 currentDate = calendar.date(byAdding: .day, value: -1, to: currentDate) ?? currentDate
             } else {
-                break // Break streak if a day is missed
+                break
             }
         }
         
@@ -1454,7 +1775,7 @@ struct StatView: View {
     let color: Color
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .center, spacing: 8) {
             Label(title, systemImage: icon)
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -1462,31 +1783,44 @@ struct StatView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
                 .foregroundColor(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 100)
+        .frame(height: 100)
         .padding()
         .background(color.opacity(0.1))
-        .cornerRadius(12)
+        .cornerRadius(22)
     }
 }
 
-// Add this class near the top of the file
+
 class SharedDataManager: ObservableObject {
     @Published var entries: [OCDEntry] = []
     @Published var moodHistory: [OCDMood] = []
+    @Published var hasSeenTrackerTutorial = false
+    @Published var hasSeenRelaxationTutorial = false
+    @Published var hasSeenERPTutorial = false
     
     init() {
         loadData()
+        
+        hasSeenTrackerTutorial = false
+        hasSeenRelaxationTutorial = false
+        hasSeenERPTutorial = false
+        
+        UserDefaults.standard.set(false, forKey: "hasSeenTrackerTutorial")
+        UserDefaults.standard.set(false, forKey: "hasSeenRelaxationTutorial")
+        UserDefaults.standard.set(false, forKey: "hasSeenERPTutorial")
     }
     
     func loadData() {
-        // Load entries
+      
         if let savedData = UserDefaults.standard.data(forKey: "OCDEntries"),
            let decodedEntries = try? JSONDecoder().decode([OCDEntry].self, from: savedData) {
             entries = decodedEntries
         }
         
-        // Load mood history
         if let savedMoodData = UserDefaults.standard.data(forKey: "moodHistory"),
            let decodedMoodHistory = try? JSONDecoder().decode([OCDMood].self, from: savedMoodData) {
             moodHistory = decodedMoodHistory
@@ -1494,12 +1828,9 @@ class SharedDataManager: ObservableObject {
     }
     
     func saveData() {
-        // Save entries
         if let encoded = try? JSONEncoder().encode(entries) {
             UserDefaults.standard.set(encoded, forKey: "OCDEntries")
         }
-        
-        // Save mood history
         if let encodedMood = try? JSONEncoder().encode(moodHistory) {
             UserDefaults.standard.set(encodedMood, forKey: "moodHistory")
         }
@@ -1514,6 +1845,28 @@ class SharedDataManager: ObservableObject {
         moodHistory.append(mood)
         saveData()
     }
+    
+    func clearMoodHistory() {
+        moodHistory.removeAll()
+        saveData()
+        objectWillChange.send()
+    }
+    
+    func markTutorialAsSeen(_ tutorial: String) {
+        switch tutorial {
+        case "tracker":
+            hasSeenTrackerTutorial = true
+            UserDefaults.standard.set(true, forKey: "hasSeenTrackerTutorial")
+        case "relaxation":
+            hasSeenRelaxationTutorial = true
+            UserDefaults.standard.set(true, forKey: "hasSeenRelaxationTutorial")
+        case "erp":
+            hasSeenERPTutorial = true
+            UserDefaults.standard.set(true, forKey: "hasSeenERPTutorial")
+        default:
+            break
+        }
+    }
 }
 
 struct MoodGraphView: View {
@@ -1522,7 +1875,6 @@ struct MoodGraphView: View {
     
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
-            // Vertical Mood Scale
             VStack(alignment: .leading, spacing: 8) {
                 Text("Mood Scale")
                     .font(.subheadline)
@@ -1546,8 +1898,6 @@ struct MoodGraphView: View {
             .background(Color(.systemGray6))
             .cornerRadius(8)
             .frame(width: 120)
-            
-            // Graph
             ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(alignment: .bottom, spacing: 12) {
@@ -1568,14 +1918,13 @@ struct MoodGraphView: View {
                                     .fixedSize()
                             }
                             .frame(width: 40)
-                            .id(mood.id) // Add id for scrolling
+                            .id(mood.id)
                         }
                     }
                     .padding(.vertical, 8)
                 }
                 .frame(height: 200)
                 .onAppear {
-                    // Scroll to the last item when view appears
                     if let lastMood = moodHistory.sorted(by: { $0.date < $1.date }).last {
                         withAnimation {
                             proxy.scrollTo(lastMood.id, anchor: .trailing)
@@ -1628,7 +1977,7 @@ struct MoodGraphView: View {
     }
 }
 
-// Add this extension at the top of the file or before InsightsView
+
 extension Date {
     func isSameDay(as date: Date) -> Bool {
         let calendar = Calendar.current
@@ -1641,7 +1990,7 @@ struct BodyScanView: View {
     @State private var isActive = false
     @State private var progress: CGFloat = 0
     @State private var showingCompletion = false
-    @State private var timeRemaining = 90 // Changed from 300 to 90 seconds
+    @State private var timeRemaining = 90
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     let bodyParts = [
@@ -1663,7 +2012,6 @@ struct BodyScanView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 24) {
-                // Progress Ring with Timer
                 ZStack {
                     Circle()
                         .stroke(Color.gray.opacity(0.2), lineWidth: 15)
@@ -1691,8 +2039,6 @@ struct BodyScanView: View {
                             .padding(.horizontal)
                     }
                 }
-                
-                // Control Button
                 Button(action: {
                     if isActive {
                         stopExercise()
@@ -1717,8 +2063,6 @@ struct BodyScanView: View {
                 if timeRemaining > 0 {
                     timeRemaining -= 1
                     progress = 1.0 - (CGFloat(timeRemaining) / 90.0)
-                    
-                    // Update body part every 11.25 seconds (90 seconds / 8 body parts)
                     let timePerPart = 90 / bodyParts.count
                     currentBodyPart = min((90 - timeRemaining) / timePerPart, bodyParts.count - 1)
                 } else {
@@ -1790,8 +2134,7 @@ struct BreathingView: View {
     @State private var breathMessage = "Get Ready..."
     @State private var ringScale = 1.0
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    
-    // Add audio session setup
+
     init() {
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback)
@@ -1800,8 +2143,7 @@ struct BreathingView: View {
             print("Failed to set up audio session: \(error)")
         }
     }
-    
-    // Update sound initialization with better error handling
+
     private var breatheInSound: AVAudioPlayer? = {
         do {
             if let url = Bundle.main.url(forResource: "breatheIn", withExtension: "mp3") {
@@ -1811,8 +2153,7 @@ struct BreathingView: View {
                 return player
             }
             print("Could not find breatheIn.mp3")
-            
-            // Print bundle contents for debugging
+ 
             if let resourcePath = Bundle.main.resourcePath {
                 print("Bundle resource path: \(resourcePath)")
                 do {
@@ -1855,8 +2196,7 @@ struct BreathingView: View {
             
             VStack {
                 Spacer()
-                
-                // Title and Message
+
                 Text("Breathing Exercise")
                     .font(.title)
                     .fontWeight(.bold)
@@ -1866,8 +2206,6 @@ struct BreathingView: View {
                     .font(.title2)
                     .foregroundColor(.secondary)
                     .padding(.bottom, 40)
-                
-                // Breathing Circle with Timer
                 ZStack {
                     Circle()
                         .stroke(Color.blue.opacity(0.3), lineWidth: 40)
@@ -1916,8 +2254,6 @@ struct BreathingView: View {
                             breatheIn.toggle()
                             breathMessage = breatheIn ? "Breathe In..." : "Breathe Out..."
                             ringScale = breatheIn ? 1.3 : 1.0
-                            
-                            // Reset and play sounds
                             if breatheIn {
                                 breatheInSound?.stop()
                                 breatheInSound?.currentTime = 0
@@ -1935,7 +2271,6 @@ struct BreathingView: View {
             }
         }
         .onAppear {
-            // Prepare audio session and players
             do {
                 try AVAudioSession.sharedInstance().setActive(true)
                 breatheInSound?.prepareToPlay()
@@ -1945,7 +2280,6 @@ struct BreathingView: View {
             }
         }
         .onDisappear {
-            // Clean up audio
             breatheInSound?.stop()
             breatheOutSound?.stop()
             do {
@@ -1962,7 +2296,6 @@ struct BreathingView: View {
         breatheIn = true
         breathMessage = "Breathe In..."
         
-        // Reset and play initial breath in sound
         breatheInSound?.stop()
         breatheInSound?.currentTime = 0
         breatheInSound?.play()
@@ -1978,7 +2311,6 @@ struct BreathingView: View {
         breatheIn = false
         breathMessage = "Get Ready..."
         
-        // Stop all sounds
         breatheInSound?.stop()
         breatheOutSound?.stop()
         
@@ -1997,7 +2329,7 @@ struct BreathingView: View {
 struct MindfulnessView: View {
     @State private var currentQuote = 0
     @State private var isActive = false
-    @State private var timeRemaining = 90 // Changed from 300 to 90 seconds
+    @State private var timeRemaining = 90
     @Environment(\.dismiss) var dismiss
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -2020,7 +2352,6 @@ struct MindfulnessView: View {
                 .ignoresSafeArea()
             
             VStack(spacing: 40) {
-                // Timer Circle
                 ZStack {
                     Circle()
                         .stroke(Color.green.opacity(0.3), lineWidth: 20)
@@ -2038,16 +2369,12 @@ struct MindfulnessView: View {
                             .foregroundColor(.green)
                     }
                 }
-                
-                // Quote Display
                 Text(mindfulnessQuotes[currentQuote])
                     .font(.title)
                     .fontWeight(.medium)
                     .multilineTextAlignment(.center)
                     .padding()
                     .animation(.easeInOut, value: currentQuote)
-                
-                // Mindfulness Symbol
                 Image(systemName: "leaf.fill")
                     .font(.system(size: 80))
                     .foregroundColor(.green)
@@ -2055,8 +2382,7 @@ struct MindfulnessView: View {
                     .animation(isActive ? .linear(duration: 20).repeatForever(autoreverses: false) : .default, value: isActive)
                 
                 Spacer()
-                
-                // Start/Stop Button
+      
                 Button(action: {
                     withAnimation {
                         if isActive {
@@ -2085,8 +2411,6 @@ struct MindfulnessView: View {
             if isActive {
                 if timeRemaining > 0 {
                     timeRemaining -= 1
-                    
-                    // Change quote every 15 seconds instead of 20
                     if timeRemaining % 15 == 0 {
                         withAnimation {
                             currentQuote = (currentQuote + 1) % mindfulnessQuotes.count
@@ -2112,11 +2436,11 @@ struct MindfulnessView: View {
     
     private func stopExercise() {
         isActive = false
-        timeRemaining = 90 // Reset to 90 seconds
+        timeRemaining = 90
     }
     
     private func showCompletionAlert() {
-        // You can customize this alert or replace it with a custom view
+
         let generator = UINotificationFeedbackGenerator()
         generator.notificationOccurred(.success)
     }
@@ -2160,35 +2484,55 @@ struct OnboardingView: View {
     ]
     
     var body: some View {
-        TabView(selection: $currentPage) {
-            ForEach(0..<onboardingPages.count, id: \.self) { index in
-                OnboardingPageView(page: onboardingPages[index])
-                    .tag(index)
+        ZStack(alignment: .topTrailing) {
+            TabView(selection: $currentPage) {
+                ForEach(0..<onboardingPages.count, id: \.self) { index in
+                    OnboardingPageView(page: onboardingPages[index])
+                        .tag(index)
+                }
             }
-        }
-        .tabViewStyle(PageTabViewStyle(indexDisplayMode: .always))
-        .indexViewStyle(PageIndexViewStyle(backgroundDisplayMode: .always))
-        .overlay(
+            .tabViewStyle(PageTabViewStyle(indexDisplayMode: .always))
+            .indexViewStyle(PageIndexViewStyle(backgroundDisplayMode: .always))
+            .overlay(
+                Button(action: {
+                    withAnimation {
+                        showOnboarding = false
+                    }
+                }) {
+                    if currentPage == onboardingPages.count - 1 {
+                        Text("Get Started")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.blue)
+                            .cornerRadius(12)
+                            .padding(.horizontal)
+                    }
+                }
+                .padding(.bottom, 50),
+                alignment: .bottom
+            )
+
             Button(action: {
                 withAnimation {
                     showOnboarding = false
-                    UserDefaults.standard.set(true, forKey: "hasSeenOnboarding")
                 }
             }) {
-                if currentPage == onboardingPages.count - 1 {
-                    Text("Get Started")
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.blue)
-                        .cornerRadius(12)
-                        .padding(.horizontal)
-                }
+                Text("Skip")
+                    .font(.headline)
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.9))
+                            .shadow(color: .black.opacity(0.1), radius: 4)
+                    )
             }
-            .padding(.bottom, 50),
-            alignment: .bottom
-        )
+            .padding(.top, 8)
+            .padding(.trailing, 16)
+        }
     }
 }
 
@@ -2264,7 +2608,7 @@ struct TutorialTipView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(.systemGray6))
-        .cornerRadius(12)
+        .cornerRadius(22)
     }
 }
 
@@ -2317,7 +2661,7 @@ struct LogObsessionView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    // Entry Input (show when not editing OR when entries is empty)
+                    
                     if !isEditing || sharedDataManager.entries.isEmpty {
                         HStack(spacing: 12) {
                             TextField("Log your obsession", text: $newEntry)
@@ -2325,7 +2669,6 @@ struct LogObsessionView: View {
                             
                             Button(action: {
                                 addEntry()
-                                // Ensure editing mode is off when adding new entry
                                 isEditing = false
                                 selectedEntries.removeAll()
                             }) {
@@ -2337,8 +2680,6 @@ struct LogObsessionView: View {
                         }
                         .padding(.horizontal)
                     }
-                    
-                    // Entries List
                     ForEach(sharedDataManager.entries) { entry in
                         HStack {
                             if isEditing {
@@ -2402,7 +2743,6 @@ struct LogObsessionView: View {
                             withAnimation {
                                 sharedDataManager.entries.removeAll { selectedEntries.contains($0) }
                                 selectedEntries.removeAll()
-                                // Reset editing mode if no entries left
                                 if sharedDataManager.entries.isEmpty {
                                     isEditing = false
                                 }
@@ -2438,7 +2778,6 @@ struct LogObsessionView: View {
                 }
             }
         }
-        // Add this sheet presentation back
         .sheet(item: $selectedEntryForStrategies) { entry in
             NavigationView {
                 let strategies = copingStrategies.first { entry.obsession.lowercased().contains($0.key.lowercased()) }?.value ?? []
@@ -2465,7 +2804,7 @@ struct LogObsessionView: View {
                 )
                 sharedDataManager.addEntry(entry)
                 newEntry = ""
-                // Ensure we're not in editing mode after adding
+                
                 isEditing = false
                 selectedEntries.removeAll()
             }
@@ -2473,7 +2812,7 @@ struct LogObsessionView: View {
     }
 }
 
-// Update the entry card style
+
 extension View {
     func calmCardStyle() -> some View {
         self
